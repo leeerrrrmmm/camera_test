@@ -36,17 +36,11 @@ class CameraService {
       orElse: () => cameras.first,
     );
 
-    final currentRecording = _controller!.value.isRecordingVideo;
-    if (currentRecording) {
-      await _controller!.stopVideoRecording();
-    }
 
     await _controller!.dispose();
     await initialize(newCamera);
 
 
-    if (currentRecording) {
-      await _controller!.startVideoRecording();
-    }
+
   }
 }

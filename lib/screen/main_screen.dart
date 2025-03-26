@@ -15,7 +15,7 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver{
   late CameraService _cameraService;
   late VideoService _videoService;
   late GalleryService _galleryService;
@@ -198,7 +198,7 @@ class _MainScreenState extends State<MainScreen> {
                 children: <Widget>[
                   // Camera shift button
                   GestureDetector(
-                    onTap: _toggleCamera,
+                    onTap:_toggleCamera,
                     child: Icon(Icons.swipe_right_outlined, color: Colors.white, size: 35),
                   ),
                   //Button to take a photo
