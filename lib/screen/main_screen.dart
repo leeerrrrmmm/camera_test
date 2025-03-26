@@ -1,8 +1,9 @@
 import 'dart:io';
-
 import 'package:camera/camera.dart';
+import 'package:camera_test/screen/services/camera_service.dart';
+import 'package:camera_test/screen/services/galery_service.dart';
+import 'package:camera_test/screen/services/video_service.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 
 class MainScreen extends StatefulWidget {
@@ -15,94 +16,57 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
-  late CameraController _controller;
-  late Future<void> _initializeControllerFuture;
-  VideoPlayerController? _videoController;
-  bool isRecording = false;
-  final ImagePicker _picker = ImagePicker();
-
+  late CameraService _cameraService;
+  late VideoService _videoService;
+  late GalleryService _galleryService;
 
   File? _currentImageFile;
   File? _galleryImageFile;
-  File? _videoPath;
 
-  Future<void> toggleCamera() async {
-    if (widget.cameras.length < 2) return;
+  @override
+  void initState() {
+    super.initState();
+    _cameraService = CameraService();
+    _videoService = VideoService();
+    _galleryService = GalleryService();
 
-    if (isRecording) {
-      await _controller.stopVideoRecording();
-
-    }
-
-    final lensDirection = _controller.description.lensDirection;
-    final newCamera = widget.cameras.firstWhere(
-          (camera) => camera.lensDirection != lensDirection,
-      orElse: () => widget.cameras.first,
-    );
-
-    await _controller.dispose();
-
-    _controller = CameraController(newCamera, ResolutionPreset.high);
-    _initializeControllerFuture = _controller.initialize();
-
-    setState(() {});
+    _cameraService.initialize(widget.camera);
   }
 
-  Future<void> _pickImageFromGallery() async {
-    try {
-      final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-      if (image != null) {
-        setState(() {
-          _galleryImageFile = File(image.path);
-        });
-      } else {
-        print("No image selected.");
-      }
-    } catch (e) {
-      print("Error picking image: $e");
-    }
+  @override
+  void dispose() {
+    _cameraService.dispose();
+    _videoService.dispose();
+    super.dispose();
   }
 
   Future<void> _takePicture() async {
-    try {
-      await _initializeControllerFuture;
-      final image = await _controller.takePicture();
+    final imageFile = await _cameraService.takePicture();
+    if (imageFile != null) {
       setState(() {
-        _currentImageFile = File(image.path);
+        _currentImageFile = imageFile;
       });
-    } catch (e) {
-      print(e);
     }
   }
 
   Future<void> _toggleVideoButton() async {
-    try {
-      if (!isRecording) {
-        await _initializeControllerFuture;
-        await _controller.startVideoRecording();
-        setState(() {
-          isRecording = true;
-        });
-      } else {
-        final videoFile = await _controller.stopVideoRecording();
-        _videoPath = File(videoFile.path);
+    await _videoService.toggleRecording(_cameraService.controller!);
+    setState(() {});
+  }
 
-        _videoController = VideoPlayerController.file(_videoPath!)
-          ..initialize().then((_) {
-            setState(() {});
-            _videoController!.play();
-          });
-
-        setState(() {
-          isRecording = false;
-        });
-      }
-    } catch (e) {
-      print(e);
+  Future<void> _pickImageFromGallery() async {
+    final imageFile = await _galleryService.pickImageFromGallery();
+    if (imageFile != null) {
+      setState(() {
+        _galleryImageFile = imageFile;
+      });
     }
   }
 
-
+  Future<void> _toggleCamera() async {
+    await _cameraService.toggleCamera(widget.cameras);
+    setState(() {});
+  }
 
   void _clearCurrentImage() {
     setState(() {
@@ -117,29 +81,8 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _clearVideo() {
-    _videoController?.dispose();
-    setState(() {
-      _videoPath = null;
-      _videoController = null;
-    });
-  }
-
-
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = CameraController(widget.camera, ResolutionPreset.medium);
-    _initializeControllerFuture = _controller.initialize();
-  }
-
-
-
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+    _videoService.dispose();
+    setState(() {});
   }
 
   @override
@@ -148,14 +91,17 @@ class _MainScreenState extends State<MainScreen> {
       appBar: AppBar(title: const Text("Camera Task"), centerTitle: true),
       body: Stack(
         children: [
+          // Our camera
           SizedBox(
             height: MediaQuery.of(context).size.height,
             width: MediaQuery.of(context).size.width,
             child: FutureBuilder<void>(
-              future: _initializeControllerFuture,
+              future: _cameraService.initializeControllerFuture,
               builder: (context, snap) {
                 if (snap.connectionState == ConnectionState.done) {
-                  return CameraPreview(_controller);
+                  return CameraPreview(_cameraService.controller!);
+                } else if (snap.hasError) {
+                  return Center(child: Text('Camera initialization error: ${snap.error}'));
                 } else {
                   return const Center(child: CircularProgressIndicator());
                 }
@@ -163,14 +109,11 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
 
+          // Photo if it is made
           if (_currentImageFile != null)
             Stack(
               children: [
-                SizedBox(
-                  width: MediaQuery.of(context).size.width,
-                  height: MediaQuery.of(context).size.height,
-                  child: Image.file(File(_currentImageFile!.path), fit: BoxFit.cover),
-                ),
+                SizedBox(width: double.infinity,height: double.infinity,child: Image.file(_currentImageFile!, fit: BoxFit.cover)),
                 Positioned(
                   top: 20,
                   right: 20,
@@ -185,55 +128,47 @@ class _MainScreenState extends State<MainScreen> {
                 ),
               ],
             ),
-          if( _videoPath == null && _videoController == null)
-            if (_galleryImageFile != null)
-              Stack(
-                children: [
-                  SizedBox(
-                    width: MediaQuery
-                        .of(context)
-                        .size
-                        .width,
-                    height: MediaQuery
-                        .of(context)
-                        .size
-                        .height,
-                    child: Opacity(
-                      opacity: 0.5,
-                      child: Image.file(
-                          File(_galleryImageFile!.path), fit: BoxFit.cover),
-                    ),
-                  ),
-                  Positioned(
-                    top: 20,
-                    right: 20,
-                    child: GestureDetector(
-                      onTap: _clearGalleryImage,
-                      child: CircleAvatar(
-                        radius: 20,
-                        backgroundColor: Colors.red,
-                        child: Icon(Icons.close, color: Colors.white),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
 
-                  // VideoPlayer(_videoController!)),
-          // Проигрыватель видео после завершения
-          if (_videoPath != null)
+          //  Images from the gallery, if we select them
+          if (_galleryImageFile != null && _videoService.videoPath == null && _videoService.videoController == null)
+            Stack(
+              children: [
+                SizedBox(
+                  height: double.infinity,
+                  width: double.infinity,
+                  child: Opacity(
+                    opacity: 0.5,
+                    child: Image.file(_galleryImageFile!, fit: BoxFit.cover),
+                  ),
+                ),
+                Positioned(
+                  top: 20,
+                  right: 20,
+                  child: GestureDetector(
+                    onTap: _clearGalleryImage,
+                    child: CircleAvatar(
+                      radius: 20,
+                      backgroundColor: Colors.red,
+                      child: Icon(Icons.close, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+          // Watch the video if it is recorded
+          if (_videoService.videoPath != null)
             Stack(
               children: [
                 Positioned.fill(
-                  child: _videoController != null && _videoController!.value.isInitialized
-                      ? Center(
-                    child: FittedBox(
-                      fit: BoxFit.fill,
-                      child: SizedBox(
-                        width: _videoController!.value.size.width,
-                        height: _videoController!.value.size.height,
-                        child: VideoPlayer(_videoController!),
-                      ),
+                  child: _videoService.videoController != null &&
+                      _videoService.videoController!.value.isInitialized
+                      ? FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: _videoService.videoController!.value.size.width,
+                      height: _videoService.videoController!.value.size.height,
+                      child: VideoPlayer(_videoService.videoController!),
                     ),
                   )
                       : const SizedBox(),
@@ -253,7 +188,7 @@ class _MainScreenState extends State<MainScreen> {
               ],
             ),
 
-          //OTHER WIDGETS
+          // Management
           Padding(
             padding: const EdgeInsets.all(10.0),
             child: Align(
@@ -261,46 +196,36 @@ class _MainScreenState extends State<MainScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: <Widget>[
-                  // SWAP CAMERA
-                  Row(
-                    children: <Widget>[
-                      GestureDetector(
-                        onTap: () => toggleCamera(),
-                        child: Icon(Icons.swipe_right_outlined,
-                            color: Colors.white, size: 35),
-                      ),
-                      SizedBox(width: 10),
-                      // MAKE PHOTO
-                      GestureDetector(
-                        onTap: _takePicture,
-                        child: Icon(Icons.add_circle_outline_rounded,
-                            color: Colors.white, size: 35),
-                      ),
-                    ],
+                  // Camera shift button
+                  GestureDetector(
+                    onTap: _toggleCamera,
+                    child: Icon(Icons.swipe_right_outlined, color: Colors.white, size: 35),
                   ),
-                  // PLAY/PAUSE VIDEO
-                  Padding(
-                    padding: const EdgeInsets.all(10.0),
-                    child: GestureDetector(
-                      onTap: _toggleVideoButton,
-                      child: Container(
-                        margin: const EdgeInsets.only(right: 30),
-                        width: 60,
-                        height: 60,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.red,
-                          border: Border.all(color: Colors.white, width: 3),
-                        ),
-                        child: Center(
-                          child: isRecording
-                              ? const Icon(Icons.stop, color: Colors.white)
-                              : const Icon(Icons.videocam, color: Colors.white),
-                        ),
+                  //Button to take a photo
+                  GestureDetector(
+                    onTap: _takePicture,
+                    child: Icon(Icons.add_circle_outline_rounded, color: Colors.white, size: 35),
+                  ),
+                  // Video recording button
+                  GestureDetector(
+                    onTap: _toggleVideoButton,
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 30),
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.red,
+                        border: Border.all(color: Colors.white, width: 3),
+                      ),
+                      child: Center(
+                        child: _videoService.isRecording
+                            ? const Icon(Icons.stop, color: Colors.white)
+                            : const Icon(Icons.videocam, color: Colors.white),
                       ),
                     ),
                   ),
-                  // OPEN GALLERY
+                  // Button to open the gallery
                   GestureDetector(
                     onTap: _pickImageFromGallery,
                     child: Icon(Icons.photo, color: Colors.white, size: 35),
